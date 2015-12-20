@@ -12,21 +12,112 @@
 }
 
 /* defaults for elements*/
-p {
+* {
   margin: 0px;
+}
+
+/* containers */
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+}
+.game {
+  width: 99%;
+  height: 96%;
+}
+body {
+  border-size: border-box;
+  margin: 5px;
+}
+.board {
+  border: 1px solid black;
+  position: relative;
+  height: 100%;
 }
 
 /* players */
 .player {
+  position: absolute;
   display: inline-block;
   text-align: center;
+}
+.hidden .card {
+  /*color: transparent;*/
+
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.absolute {
+  position: absolute;
+}
+.top {
+  top: 0;
+}
+.bottom {
+  bottom: 0;
+}
+.left {
+  left: 0;
+}
+.right {
+  right: 0;
+}
+
+/* decks */
+.deck-list {
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.deck {
+  margin: 5px;
+  position: relative;
+  border: 1px solid red;
+
+  height: -webkit-calc(167px + 20px);
+  height: calc(167px + 20px);
+
+  width: 115px;
+}
+.deck .title {
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 30px;
+  text-align: center;
+}
+.deck .card {
+  /*position: absolute;*/
+  top: 20px;
+}
+
+/* stacks */
+.stacks {
+  border: 1px solid black;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+.stack {
+  border: 1px solid red;
+  width: 115px;
+  text-align: center;
+  margin: 2px;
+
+  height: -webkit-calc(167px + 20px);
+  height: calc(167px + 20px);
 }
 
 /* cards */
 .cards {
   position: relative;
 }
-
 .card {
   display: inline-block;
   text-align: center;
@@ -44,9 +135,8 @@ p {
   transform: scale(1) translate(0, 0);
   transition: transform 0.2s linear;
 }
-
 .card:hover {
-  transform: scale(1.02) translate(0, -5px);
+  transform: scale(1.02);
   cursor: pointer;
 }
 
@@ -71,8 +161,5 @@ p {
   color: yellow;
 }
 
-.drop {
-  width: 100%;
-  height: 100px;
-  background-color: red;
+.unknown {
 }
