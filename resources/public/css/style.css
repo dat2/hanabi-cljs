@@ -1,0 +1,78 @@
+/* some style */
+/* utility */
+.flex-column {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  height: 100%;
+}
+.big-text {
+  font-size: 200%;
+  font-weight: bolder;
+}
+
+/* defaults for elements*/
+p {
+  margin: 0px;
+}
+
+/* players */
+.player {
+  display: inline-block;
+  text-align: center;
+}
+
+/* cards */
+.cards {
+  position: relative;
+}
+
+.card {
+  display: inline-block;
+  text-align: center;
+
+  border: 1px solid black;
+  border-radius: 10px;
+  box-shadow: 2px 2px 1px #888888;
+
+  padding: 3px;
+  margin: 3px;
+  width: 100px;
+  height: 150px;
+  background-color: grey;
+
+  transform: scale(1) translate(0, 0);
+  transition: transform 0.2s linear;
+}
+
+.card:hover {
+  transform: scale(1.02) translate(0, -5px);
+  cursor: pointer;
+}
+
+/* colours */
+.red {
+  color: red;
+}
+
+.blue {
+  color: blue;
+}
+
+.white {
+  color: white;
+}
+
+.green {
+  color: green;
+}
+
+.yellow {
+  color: yellow;
+}
+
+.drop {
+  width: 100%;
+  height: 100px;
+  background-color: red;
+}
