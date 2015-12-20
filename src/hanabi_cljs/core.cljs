@@ -9,10 +9,10 @@
   (atom
     {:text "Hello world!"
      :players [
-      {:name "nick" :cards [{:number 1 :colour "red"} {:number 4 :colour "blue"}]}
-      {:name "pirave" :cards [{:number 4 :colour "white"} {:number 2 :colour "red"}]}
-      {:name "gurprit" :cards [{:number 2 :colour "yellow"} {:number 5 :colour "green"}]}
-      {:name "keenan" :cards [{:number 3 :colour "green"} {:number 1 :colour "red"}]}
+      {:name "a" :cards [{:number 1 :colour "red"} {:number 4 :colour "blue"}]}
+      {:name "b" :cards [{:number 4 :colour "white"} {:number 2 :colour "red"}]}
+      {:name "c" :cards [{:number 2 :colour "yellow"} {:number 5 :colour "green"}]}
+      {:name "d" :cards [{:number 3 :colour "green"} {:number 1 :colour "red"}]}
      ]
      :center []
      :discard []
