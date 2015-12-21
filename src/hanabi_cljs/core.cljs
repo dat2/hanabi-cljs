@@ -10,7 +10,7 @@
   (map-indexed (fn [i item] (assoc item :key i)) xs))
 
 (defn index-cards [cards]
-  (react-key-index (map #(assoc {} :card %) cards)))
+  (react-key-index (map #(assoc {} :card % :know-colour false :know-number false) cards)))
 
 ;; from http://stackoverflow.com/questions/25324082/index-of-vector-in-clojurescript
 (defn index-of [coll v]
@@ -41,7 +41,7 @@
   ;; then shuffle it
   (let [deck (for [c colors [x n] ns]
                   (for [_ (range n)] (colour-number-to-card c x)))]
-    (into [] (flatten deck))))
+    (shuffle (flatten deck))))
 
 (defn make-stacks [colours]
   (reduce #(assoc %1 %2 []) {} colours))
@@ -54,10 +54,10 @@
   (atom
     ;;players
     {:players {
-      :player-1 {:name "Player 1" :cards [] :known-colours [] :known-numbers [] :position "top left"}
-      :player-2 {:name "Player 2" :cards [] :known-colours [] :known-numbers [] :position "top right"}
-      :player-3 {:name "Player 3" :cards [] :known-colours [] :known-numbers [] :position "bottom left"}
-      :player-4 {:name "Player 4" :cards [] :known-colours [] :known-numbers [] :position "bottom right"}
+      :player-1 {:name "Player 1" :cards [] :known-colours #{} :known-numbers #{} :position "top left"}
+      :player-2 {:name "Player 2" :cards [] :known-colours #{} :known-numbers #{} :position "top right"}
+      :player-3 {:name "Player 3" :cards [] :known-colours #{} :known-numbers #{} :position "bottom left"}
+      :player-4 {:name "Player 4" :cards [] :known-colours #{} :known-numbers #{} :position "bottom right"}
      }
      :name-to-id {
       "Player 1" :player-1
@@ -65,11 +65,13 @@
       "Player 3" :player-3
       "Player 4" :player-4
      }
-     :me :player-3
+     :me :player-1
      ;; simple variables
      :lives 3
-     :info 8
      :game-over false
+     ;; info
+     :info 8
+     :info-mode :neither
      ;; cards
      :stacks (make-stacks colours)
      :discard []
@@ -92,6 +94,17 @@
         ;; or the number on the stack is one less than the card we are playing
         (and (not (empty? stack)) (= (dec number) (number-of-card (peek stack)))))
       ))
+
+(defn get-info-mode []
+  (:info-mode @app-state))
+
+(defn me? [player-id]
+  (= (:me @app-state) player-id))
+
+(defn player-knows-colour? [player-id card]
+  (contains? (get-in @app-state [:players player-id :known-colours]) (colour-of-card card)))
+(defn player-knows-number? [player-id card]
+  (contains? (get-in @app-state [:players player-id :known-numbers]) (number-of-card card)))
 
 ;; setters
 (defn set-player-name [player-id newname]
@@ -117,6 +130,10 @@
 (defn add-info []
   (swap! app-state
     #(update % :info inc)))
+
+(defn set-info-mode [mode]
+  (swap! app-state
+    #(assoc % :info-mode mode)))
 
 ;; remove a card from play
 (defn discard [card]
@@ -168,6 +185,19 @@
     ;; check if game over
   ))
 
+;; crap, we need a way to filter out cards that we already have
+;; or, we should just give them an option to mark it?
+(defn tell-info-to [player card]
+  (let [info (:info @app-state)
+        mode (:info-mode @app-state)
+        info-key (if (= mode :colour) :known-colours :known-numbers)
+        info-fn (if (= mode :colour) colour-of-card number-of-card)]
+    (if (and (not (me? player)) (> info 0))
+      (swap! app-state
+        (fn [state]
+          (update-in (update state :info dec) [:players player info-key] conj (info-fn card))))
+      '())))
+
 ;; deal 5 cards to each player
 (defn on-card-drag [data]
   (fn [e]
@@ -175,41 +205,57 @@
       (set! (.-effectAllowed (.-dataTransfer e)) "move")
       (.setData (.-dataTransfer e) "card-drag" (str data)))))
 
+(defn on-card-click [player card]
+  (fn [e]
+    (tell-info-to player card)))
+
 ;; each card as a colour, and a number
-(defn <card> [{ :keys [player card] }]
+(defn <card> [{ :keys [player card know-colour know-number] }]
   (let [colour (colour-of-card card)
         number (number-of-card card)]
-    [:div.card {:draggable true
-                :on-drag-start (on-card-drag [player card])}
-      [:div.flex-column.big-text
-        [:p {:class colour} number]
+    [:div {:draggable (me? player)
+           :on-drag-start (on-card-drag [player card])
+           :class (str "card " (if know-colour (name colour) "unknown"))
+           :on-click (on-card-click player card)}
+      [:div {:style {:position "relative" :height "100%"} :class "flex-column"}
+        [:p.absolute.top.left.big-text
+          [:span.number-wrapper (if know-number number)]
+        ]
+        [:p.absolute.bottom.right.big-text
+          [:span.number-wrapper (if know-number number)]
+        ]
       ]
     ]))
 
 ;; each player has some cards
-(defn <player> [{ :keys [key cards name position] }]
-  [:div.player {:class (str (if (= (:me @app-state) key) "hidden " "") position)}
-    [:div.flex-column
-      [:p name]
-      [:div.cards
-        (for [card (map #(assoc % :player key) (index-cards cards))]
-          [<card> card])
+(defn <player> [{ :keys [key cards name position known-colours known-numbers] }]
+  (let [not-me (not (me? key))]
+    [:div.player {:class (str (if (= (:me @app-state) key) "hidden " "") position)}
+      [:div.flex-column
+        [:p name]
+        [:div.cards
+          (doall (for [card (map #(assoc % :player key) (index-cards cards))]
+            [<card>
+              (assoc card
+                :know-colour (or (player-knows-colour? key (:card card)) not-me)
+                :know-number (or (player-knows-number? key (:card card)) not-me))
+              ]))
+        ]
       ]
-    ]
-  ])
+    ]))
 
 ;; each stack
 (defn stacks-to-react []
   (map #(assoc {} :cards (second %) :colour (name (first %))) (:stacks @app-state)))
 
 (defn <stack> [{:keys [cards colour]}]
-  [:div.stack {:class (str (if (= (:me @app-state) (keyword name)) "hidden" "") position)}
+  [:div.stack {:class (str (if (= (:me @app-state) (keyword name)) "hidden" "") "")}
     [:div
       [:p colour]
       [:div.cards
         (for [card (index-cards cards)]
           [:div {:style {:position "absolute" :top (str (* 8 (:key card)) "px")} :key (:key card)}
-            [<card> card]
+            [<card> (assoc card :know-number true :know-colour true)]
           ])
       ]
     ]
@@ -223,11 +269,17 @@
   (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
     (discard-card player card)))
 
+(defn on-click-colour []
+  (set-info-mode :colour))
+
+(defn on-click-number []
+  (set-info-mode :number))
+
 ;; the main component
 (defn <hanabi> []
   [:div.game
-    [:button "Give Colour"]
-    [:button "Give Number"]
+    [:button {:on-click on-click-colour :class (if (= (get-info-mode) :colour) "active-mode-button" "mode-button")} "Give Colour"]
+    [:button {:on-click on-click-number :class (if (= (get-info-mode) :number) "active-mode-button" "mode-button")} "Give Number"]
     [:p.inline-block (str "Lives: " (:lives @app-state))]
     [:p.inline-block (str "Info: " (:info @app-state))]
     [:div.board.flex-column
@@ -236,7 +288,7 @@
         [:div.deck { :on-drag-over #(.preventDefault %) :on-drop on-discard-drop }
           [:p.title "Discard"]
           (for [card (index-cards (:discard @app-state))]
-            [<card> card])
+            [<card> (assoc card :know-number true :know-colour true)])
         ]
         [:div.deck
           [:p.title "Deck"]
