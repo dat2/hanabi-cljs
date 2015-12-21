@@ -1,9 +1,15 @@
 (ns hanabi-cljs.core
-  (:require [reagent.core :as reagent :refer [atom]]
-            [cljs.reader :as reader]
-            [clojure.string :refer [split]]))
+  (:require [cljs.reader :as reader]
+            [clojure.string :refer [split]]
+            [om.core :as om :include-macros true]
+            [om.dom :as dom :include-macros true]))
 
 (enable-console-print!)
+
+;; A realization: This will eventually be live multiplayer, using socket.io
+;; So app state will not be here, but on the server
+;; However, we should be able to move it over directly to a clojure server
+;; we just need to update the front-end to call events
 
 ;; for react's complaining
 (defn react-key-index [xs]
@@ -195,7 +201,7 @@
     (if (and (not (me? player)) (> info 0))
       (swap! app-state
         (fn [state]
-          (update-in (update state :info dec) [:players player info-key] conj (info-fn card))))
+          (update-in (assoc (update state :info dec) :info-mode :neither) [:players player info-key] conj (info-fn card))))
       '())))
 
 ;; deal 5 cards to each player
@@ -210,64 +216,57 @@
     (tell-info-to player card)))
 
 ;; each card as a colour, and a number
-(defn <card> [{ :keys [player card know-colour know-number] }]
+(defn card-view [{ :keys [player card know-colour know-number] }]
   (let [colour (colour-of-card card)
         number (number-of-card card)]
-    [:div {:draggable (me? player)
-           :on-drag-start (on-card-drag [player card])
-           :class (str "card " (if know-colour (name colour) "unknown"))
-           :on-click (on-card-click player card)}
-      [:div {:style {:position "relative" :height "100%"} :class "flex-column"}
-        [:p.absolute.top.left.big-text
-          [:span.number-wrapper (if know-number number)]
-        ]
-        [:p.absolute.bottom.right.big-text
-          [:span.number-wrapper (if know-number number)]
-        ]
-      ]
-    ]))
+    (dom/div #js {:draggable (me? player)
+           :onDragStart (on-card-drag [player card])
+           :className (str "card " (if know-colour (name colour) "unknown") " no-select")
+           :onClick (on-card-click player card)}
+      (dom/div #js {:style #js {:position "relative" :height "100%"} :className "flex-column"}
+        (dom/p #js {:className "absolute top left big-text"}
+          (dom/span #js {:className "number-wrapper"} (if know-number number)))
+        (dom/p #js {:className "absolute bottom right big-text"}
+          (dom/span #js {:className "number-wrapper" } (if know-number number)))
+      )
+    )))
 
 ;; each player has some cards
-(defn <player> [{ :keys [key cards name position known-colours known-numbers] }]
-  (let [not-me (not (me? key))]
-    [:div.player {:class (str (if (= (:me @app-state) key) "hidden " "") position)}
-      [:div.flex-column
-        [:p name]
-        [:div.cards
-          (doall (for [card (map #(assoc % :player key) (index-cards cards))]
-            [<card>
-              (assoc card
-                :know-colour (or (player-knows-colour? key (:card card)) not-me)
-                :know-number (or (player-knows-number? key (:card card)) not-me))
-              ]))
-        ]
-      ]
-    ]))
+(defn player-view [[id { :keys [cards name position known-colours known-numbers] }]]
+  (let [not-me (not (me? id))]
+    (dom/div #js {:className (str "player " (if (= (:me @app-state) id) "hidden " "") position)}
+      (dom/div #js {:className "flex-column"}
+        (dom/p nil name)
+        (apply dom/div #js {:className "cards"}
+          (map
+            #(card-view (assoc {} :player id
+              :card %
+              :know-colour (or (player-knows-colour? id %) not-me)
+              :know-number (or (player-knows-number? id %) not-me)))
+            cards))
+        )
+      )
+    ))
 
 ;; each stack
 (defn stacks-to-react []
   (map #(assoc {} :cards (second %) :colour (name (first %))) (:stacks @app-state)))
 
-(defn <stack> [{:keys [cards colour]}]
-  [:div.stack {:class (str (if (= (:me @app-state) (keyword name)) "hidden" "") "")}
-    [:div
-      [:p colour]
-      [:div.cards
-        (for [card (index-cards cards)]
-          [:div {:style {:position "absolute" :top (str (* 8 (:key card)) "px")} :key (:key card)}
-            [<card> (assoc card :know-number true :know-colour true)]
-          ])
-      ]
-    ]
-  ])
+(defn stack-view [{:keys [cards colour]}]
+  (dom/div #js {:className "stack"}
+    (dom/div nil
+      (dom/p nil (str colour))
+      (apply dom/div #js {:className "cards"}
+        (map-indexed
+          #(dom/div #js {:style #js {:position "absolute" :top (str (* 8 %1) "px")}}
+            (card-view (assoc {} :card %2 :know-number true :know-colour true)))
+          cards))
+    )
+  ))
 
 (defn on-stack-drop [e]
   (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
     (play-card player card)))
-
-(defn on-discard-drop [e]
-  (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
-    (discard-card player card)))
 
 (defn on-click-colour []
   (set-info-mode :colour))
@@ -275,41 +274,54 @@
 (defn on-click-number []
   (set-info-mode :number))
 
-;; the main component
-(defn <hanabi> []
-  [:div.game
-    [:button {:on-click on-click-colour :class (if (= (get-info-mode) :colour) "active-mode-button" "mode-button")} "Give Colour"]
-    [:button {:on-click on-click-number :class (if (= (get-info-mode) :number) "active-mode-button" "mode-button")} "Give Number"]
-    [:p.inline-block (str "Lives: " (:lives @app-state))]
-    [:p.inline-block (str "Info: " (:info @app-state))]
-    [:div.board.flex-column
-    ;; decks
-      [:div.deck-list
-        [:div.deck { :on-drag-over #(.preventDefault %) :on-drop on-discard-drop }
-          [:p.title "Discard"]
-          (for [card (index-cards (:discard @app-state))]
-            [<card> (assoc card :know-number true :know-colour true)])
-        ]
-        [:div.deck
-          [:p.title "Deck"]
-          (for [card (index-cards (:deck @app-state))]
-            [<card> card])
-        ]
-      ]
-    ;; stacks
-    [:div.stacks { :on-drag-over #(.preventDefault %) :on-drop on-stack-drop }
-      (for [stack (react-key-index (stacks-to-react))]
-        [<stack> stack])
-    ]
-    ;; player
-      (for [player (map #(assoc (second %) :key (first %)) (:players @app-state))]
-        [<player> player])
-    ]
-  ])
+(defn on-discard-drop [e]
+  (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
+    (discard-card player card)))
 
-(deal-start-cards 5)
-(reagent/render-component [<hanabi>]
-                          (. js/document (getElementById "app")))
+;; the main component
+(defn hanabi-view [data]
+  (dom/div #js {:className "game" }
+    (dom/button #js {:onClick on-click-colour :className (if (= (get-info-mode) :colour) "active-mode-button" "mode-button")} "Give Colour")
+    (dom/button #js {:onClick on-click-number :className (if (= (get-info-mode) :number) "active-mode-button" "mode-button")} "Give Number")
+    (dom/p #js {:className "inline-block"} (str "Lives: " (:lives data)))
+    (dom/p #js {:className "inline-block"}  (str "Info: " (:info data)))
+
+    (dom/div #js {:className "board flex-column no-select"}
+      ;; deck / discard
+      (dom/div #js {:className "deck-list"}
+        (dom/div #js {:className "deck" :onDragOver #(.preventDefault %) :onDrop on-discard-drop }
+          (dom/p #js {:className "title"} "Discard")
+          (apply dom/div #js {:className "container"}
+            (map #(card-view (assoc {} :card % :know-number true :know-colour true)) (:discard data)))
+        )
+        (dom/div #js {:className "deck"}
+          (dom/p #js {:className "title"} "Deck")
+          (apply dom/div #js {:className "container"}
+            (map #(card-view (assoc {} :card % :know-number true :know-colour true)) (:deck data)))
+        )
+      )
+
+      ;; stacks
+      (apply dom/div
+        #js {:className "stacks" :onDragOver #(.preventDefault %) :onDrop on-stack-drop }
+        (map stack-view (stacks-to-react))
+      )
+
+      ;; player
+      (apply dom/div nil
+        (map player-view (:players data)))
+    )
+  )
+)
+
+(defonce __start__ (deal-start-cards 5))
+(om/root
+  (fn [data owner]
+    (om/component
+      (hanabi-view data)
+    ))
+  app-state
+  {:target (. js/document (getElementById "app"))})
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
