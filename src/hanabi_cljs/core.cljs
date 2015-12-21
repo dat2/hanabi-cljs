@@ -1,15 +1,16 @@
 (ns hanabi-cljs.core
   (:require [reagent.core :as reagent :refer [atom]]
-            [cljs.reader :as reader]))
+            [cljs.reader :as reader]
+            [clojure.string :refer [split]]))
 
 (enable-console-print!)
 
 ;; for react's complaining
 (defn react-key-index [xs]
-  (map-indexed (fn [k item] (assoc item :key k)) xs))
+  (map-indexed (fn [i item] (assoc item :key i)) xs))
 
-(defn find-pred [pred coll]
-  (first (filter pred coll)))
+(defn index-cards [cards]
+  (react-key-index (map #(assoc {} :card %) cards)))
 
 ;; from http://stackoverflow.com/questions/25324082/index-of-vector-in-clojurescript
 (defn index-of [coll v]
@@ -21,63 +22,153 @@
 (defn index-of-similar [coll v]
   (index-of (map #(select-keys % (keys v)) coll) v))
 
+(defn colour-number-to-card [colour number]
+  (keyword (str (name colour) "-" number)))
+
+(defn card-to-colour-number [card]
+  (let [[colour number] (split (name card) #"-")]
+    {:colour (keyword colour) :number (int number)}))
+
+(defn colour-of-card [card]
+  (:colour (card-to-colour-number card)))
+
+(defn number-of-card [card]
+  (:number (card-to-colour-number card)))
+
 ;; need to take into account weighting
 (defn generate-deck [colors ns]
   ;; first make a deck
   ;; then shuffle it
   (let [deck (for [c colors [x n] ns]
-                  (for [_ (range n)] {:number x :colour c}))]
-    (shuffle (flatten deck))))
+                  (for [_ (range n)] (colour-number-to-card c x)))]
+    (into [] (flatten deck))))
 
 (defn make-stacks [colours]
-  (for [colour colours]
-    {:colour colour :cards []}))
+  (reduce #(assoc %1 %2 []) {} colours))
+
+(def colours [:red :blue :white :green :yellow])
+(def number-weights [[1 3] [2 2] [3 2] [4 2] [5 1]])
 
 ;; define your app data so that it doesn't get over-written on reload
 (defonce app-state
   (atom
+    ;;players
     {:players {
-      :player-1 {:name "Player 1" :cards [] :position "top left"}
-      :player-2 {:name "Player 2" :cards [] :position "top right"}
-      :player-3 {:name "Player 3" :cards [] :position "bottom left"}
-      :player-4 {:name "Player 4" :cards [] :position "bottom right"}
+      :player-1 {:name "Player 1" :cards [] :known-colours [] :known-numbers [] :position "top left"}
+      :player-2 {:name "Player 2" :cards [] :known-colours [] :known-numbers [] :position "top right"}
+      :player-3 {:name "Player 3" :cards [] :known-colours [] :known-numbers [] :position "bottom left"}
+      :player-4 {:name "Player 4" :cards [] :known-colours [] :known-numbers [] :position "bottom right"}
+     }
+     :name-to-id {
+      "Player 1" :player-1
+      "Player 2" :player-2
+      "Player 3" :player-3
+      "Player 4" :player-4
      }
      :me :player-3
-     :stacks (make-stacks ["red" "blue" "white" "green" "yellow"])
+     ;; simple variables
+     :lives 3
+     :info 8
+     :game-over false
+     ;; cards
+     :stacks (make-stacks colours)
      :discard []
-     :deck (generate-deck ["red" "blue" "white" "green" "yellow"] [[1 3] [2 2] [3 2] [4 2] [5 1]])
-     }))
+     :deck (generate-deck colours number-weights)
+     }
+  ))
 
-(defn find-player-with-name [name]
-  (find-pred #(= (:name (second %)) name) (:players @app-state)))
+;; getters
+(defn get-id-from-name [name]
+  (get-in @app-state [:name-to-id name]))
 
-(println )
+;; check if it is valid to play this card
+(defn valid-play? [card]
+  (let [colour (colour-of-card card)
+        number (number-of-card card)
+        stack (get-in @app-state [:stacks colour])]
+      (or
+        ;; the stack is empty, and we're adding a 1
+        (and (= number 1) (empty? stack))
+        ;; or the number on the stack is one less than the card we are playing
+        (and (not (empty? stack)) (= (dec number) (number-of-card (peek stack)))))
+      ))
 
-(defn check-valid-move [card]
-  true)
+;; setters
+(defn set-player-name [player-id newname]
+  (let [oldname (get-in @app-state [:players player-id :name])]
+    (swap! app-state
+      (fn [state]
+        (update
+          (assoc-in state [:players player-id :name] newname)
+          :name-to-id   #(dissoc (assoc % newname player-id) oldname)
+            )))))
 
-;; update app state, to take the top card off the deck and give it to the player
-(defn deal-card-to [player]
+;; remove a life
+(defn remove-life []
   (swap! app-state
-    (fn [state] (let [card (peek (:deck @app-state))]
-      (update-in (update state :deck pop) [:players player :cards] conj card)))))
+    #(update % :lives dec)))
+
+;; remove an info token
+(defn remove-info []
+  (swap! app-state
+    #(update % :info dec)))
+
+;; add an info token
+(defn add-info []
+  (swap! app-state
+    #(update % :info inc)))
+
+;; remove a card from play
+(defn discard [card]
+  (swap! app-state
+    #(update % :discard conj card)))
+
+(defn pop-deck []
+  (let [card (peek (:deck @app-state))]
+    (do
+      (swap! app-state #(update % :deck pop))
+      card)))
+
+(defn deal-card-to [player]
+  (let [card (pop-deck)]
+    (swap! app-state
+      #(update-in % [:players player :cards] conj card))))
 
 ;; deal [n] cards to each player
 (defn deal-start-cards [n]
   (let [players (keys (:players @app-state))]
     (doseq [_ (range n) player players]
-      (deal-card-to player))))
+      (deal-card-to player)
+        )))
 
-(defn try-play-card [{ :keys [player number colour] }]
-  (let [[player-keyword real-player] (find-player-with-name player)
-        cardIndex (index-of-similar (:cards real-player) {:number number :colour colour})]
-    (swap! app-state
-      (fn [state]
-        (update-in state [:players player-keyword :cards] #(split-at cardIndex %))))))
+(defn remove-card-from-player [player card]
+  (swap! app-state
+    (fn [state]
+      (update-in state [:players player :cards] (fn [v] (filterv #(not (= card %)) v)))
+        )))
+
+(defn append-card-to-stacks [card]
+  (swap! app-state
+    #(update-in % [:stacks (colour-of-card card)] conj card)
+        ))
+
+(defn play-card [player-id card]
+  (do
+    (remove-card-from-player player-id card)
+    (deal-card-to player-id)
+    (if (valid-play? card) (append-card-to-stacks card) (do (remove-life) (discard card)))
+  ))
+
+(defn discard-card [player-id card]
+  (do
+    (remove-card-from-player player-id card)
+    (deal-card-to player-id)
+    (discard card)
+    (add-info)
+    ;; check if game over
+  ))
 
 ;; deal 5 cards to each player
-(deal-start-cards 5)
-
 (defn on-card-drag [data]
   (fn [e]
     (do
@@ -85,71 +176,88 @@
       (.setData (.-dataTransfer e) "card-drag" (str data)))))
 
 ;; each card as a colour, and a number
-(defn <card> [{ :keys [number colour player know-colour know-number] }]
-  [:div.card {:class (str (if know-colour colour colour))
-              :draggable true
-              :on-drag-start (on-card-drag {:player player :number number :colour colour}) }
-    [:div.flex-column.big-text
-      [:p {:style { :display (if know-number "" "") } } (if know-number number number)]
-    ]
-  ])
+(defn <card> [{ :keys [player card] }]
+  (let [colour (colour-of-card card)
+        number (number-of-card card)]
+    [:div.card {:draggable true
+                :on-drag-start (on-card-drag [player card])}
+      [:div.flex-column.big-text
+        [:p {:class colour} number]
+      ]
+    ]))
 
 ;; each player has some cards
-(defn <player> [{ :keys [cards name position] }]
-  [:div.player {:class (str (if (= (:me @app-state) (keyword name)) "hidden" "") position)}
+(defn <player> [{ :keys [key cards name position] }]
+  [:div.player {:class (str (if (= (:me @app-state) key) "hidden " "") position)}
     [:div.flex-column
       [:p name]
       [:div.cards
-        (for [card (react-key-index cards)]
-          [<card> (assoc card :player name ) ])]
+        (for [card (map #(assoc % :player key) (index-cards cards))]
+          [<card> card])
+      ]
     ]
   ])
 
 ;; each stack
-(defn <stack> [{ :keys [colour cards] }]
+(defn stacks-to-react []
+  (map #(assoc {} :cards (second %) :colour (name (first %))) (:stacks @app-state)))
+
+(defn <stack> [{:keys [cards colour]}]
   [:div.stack {:class (str (if (= (:me @app-state) (keyword name)) "hidden" "") position)}
-    [:div.flex-column
+    [:div
       [:p colour]
-      [:div.cards (map #([<card> %]) (react-key-index cards)) ]
+      [:div.cards
+        (for [card (index-cards cards)]
+          [:div {:style {:position "absolute" :top (str (* 8 (:key card)) "px")} :key (:key card)}
+            [<card> card]
+          ])
+      ]
     ]
   ])
 
 (defn on-stack-drop [e]
-  (try-play-card (reader/read-string (.getData (.-dataTransfer e) "card-drag"))))
+  (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
+    (play-card player card)))
+
+(defn on-discard-drop [e]
+  (let [[player card] (reader/read-string (.getData (.-dataTransfer e) "card-drag"))]
+    (discard-card player card)))
 
 ;; the main component
 (defn <hanabi> []
   [:div.game
     [:button "Give Colour"]
     [:button "Give Number"]
+    [:p.inline-block (str "Lives: " (:lives @app-state))]
+    [:p.inline-block (str "Info: " (:info @app-state))]
     [:div.board.flex-column
     ;; decks
       [:div.deck-list
-        [:div.deck
+        [:div.deck { :on-drag-over #(.preventDefault %) :on-drop on-discard-drop }
           [:p.title "Discard"]
-          (for [card (react-key-index (:discard @app-state))]
+          (for [card (index-cards (:discard @app-state))]
             [<card> card])
         ]
         [:div.deck
           [:p.title "Deck"]
-          (for [card (react-key-index (:deck @app-state))]
+          (for [card (index-cards (:deck @app-state))]
             [<card> card])
         ]
       ]
     ;; stacks
     [:div.stacks { :on-drag-over #(.preventDefault %) :on-drop on-stack-drop }
-      (for [stack (react-key-index (:stacks @app-state))]
+      (for [stack (react-key-index (stacks-to-react))]
         [<stack> stack])
     ]
     ;; player
-      (for [player (react-key-index (map second (seq (:players @app-state))))]
+      (for [player (map #(assoc (second %) :key (first %)) (:players @app-state))]
         [<player> player])
     ]
   ])
 
+(deal-start-cards 5)
 (reagent/render-component [<hanabi>]
                           (. js/document (getElementById "app")))
-
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on

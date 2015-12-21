@@ -15,6 +15,9 @@
 * {
   margin: 0px;
 }
+.inline-block {
+  display: inline-block;
+}
 
 /* containers */
 html,
@@ -91,7 +94,7 @@ body {
   text-align: center;
 }
 .deck .card {
-  /*position: absolute;*/
+  position: absolute;
   top: 20px;
 }
 
